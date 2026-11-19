@@ -213,6 +213,26 @@ class StatsTests(unittest.TestCase):
         self.assertEqual(sec["streaks"]["longest_loss"]["length"], 3)
         self.assertEqual(sec["streaks"]["current"], {"type": "W", "length": 1})
 
+    def test_insights(self):
+        rows = rows_from(demo.generate_replays(600, seed=7), demo.DEMO_SID)
+        out = stats.compute(rows, {"lp_timing": "auto"})
+        tips = out["insights"]
+        self.assertTrue(1 <= len(tips) <= 4)
+        for tip in tips:
+            self.assertEqual(set(tip), {"tone", "icon", "tab", "title", "text"})
+            self.assertIn(tip["tone"], ("warn", "good", "info"))
+        self.assertIn("You tilt after back-to-back losses", [t["title"] for t in tips])
+        self.assertEqual(stats.compute([], {})["insights"], [])
+
+    def test_recent_gaps(self):
+        reps = [replay("1", 1000, my_lp=10000), replay("2", 2000, my_lp=10100),
+                replay("3", 3000, my_lp=12000), replay("4", 4000, my_lp=12100)]
+        out = stats.compute(rows_from(reps), {"lp_timing": "pre"}, now=5000)
+        self.assertEqual(out["gaps"]["count"], 1)
+        self.assertEqual(out["gaps"]["items"][0]["lp"], 1900)
+        old = stats.compute(rows_from(reps), {"lp_timing": "pre"}, now=5000 + 30 * 86400)
+        self.assertEqual(old["gaps"]["count"], 0)
+
     def test_opponent_buckets(self):
         reps = [replay("1", 1, my_lp=10000, opp_lp=10000),                      # same division
                 replay("2", 2, my_lp=10000, opp_lp=11500),                      # 2 above

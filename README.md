@@ -4,8 +4,12 @@ A local Street Fighter 6 ranked tracker. It pulls your ranked battle log from Ca
 Buckler's Boot Camp, keeps every match in a local database (Buckler itself only shows
 about your last 100), and shows your stats in a browser dashboard.
 
-- **Overview**: win rate, record, round win rate, net LP/MR, current streak, rank and
-  progress for every character, rolling win-rate trend, recent form, best and worst matchups.
+- **Overview**: your main character's rank (with a league emblem and progress to the next
+  division or Master tier) and your other characters beside it, win rate, record, round win
+  rate, net LP/MR, current streak, **tips from your stats** (toughest matchup, tilt, long
+  sessions, comebacks and more), rolling win-rate trend, recent form.
+- **Sync status** in the header: when you last synced, one-click sync, and a warning when it's
+  been a while, a sync failed, or your rating jumped in a way that means matches were missed.
 - **Rank**: LP over time with division lines, MR over time with Master tier lines, LP/MR
   gained and lost per match, per day or per session, and every promotion and demotion.
 - **Matchups**: win rate against every opponent character, plus round win rate and net LP.
@@ -42,7 +46,7 @@ python3 -m sf6tracker --data data-demo serve --port 8766
 
 ## Getting your matches in
 
-Open the **Sync** tab.
+Open the **Sync** tab. The first time, it walks you through three steps:
 
 1. **User code.** Paste your Buckler profile URL or the number at its end
    (`streetfighter.com/6/buckler/profile/<user code>`).

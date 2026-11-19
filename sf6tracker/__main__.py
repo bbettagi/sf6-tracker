@@ -64,6 +64,7 @@ def main(argv=None):
         rows = generate(args.matches)
         store.insert_matches(rows)
         store.update_config({"sid": "1000000001"})
+        store.log_sync("demo data", "ok", len(rows), "Generated demo matches")
         print(f"Added {len(rows)} demo matches to {store.data_dir}.")
 
 

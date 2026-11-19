@@ -104,7 +104,7 @@ async function loadMeta() {
     ...state.meta.my_characters.map((c) => h("option", { value: c, text: c })));
   sel.value = state.meta.my_characters.includes(current) ? current : "";
   const cfg = state.meta.config;
-  $("#quick-sync").hidden = !(cfg.cookie_set && cfg.sid);
+  renderSyncStatus();
 }
 
 async function loadStats() {
@@ -195,8 +195,14 @@ const refLinesPlugin = {
       ctx.lineTo(chartArea.right, py);
       ctx.stroke();
       if (line.label && lastLabelY - py >= 14 && py - chartArea.top >= 12) {
+        let x = chartArea.left + 6;
+        if (line.color) {   // league swatch beside the division name
+          ctx.fillStyle = line.color;
+          ctx.fillRect(x, py - 11, 8, 8);
+          x += 12;
+        }
         ctx.fillStyle = css("--muted");
-        ctx.fillText(line.label, chartArea.left + 6, py - 3);
+        ctx.fillText(line.label, x, py - 3);
         lastLabelY = py;
       }
     }
@@ -434,18 +440,103 @@ function rankHeadline(info) {
   return { title: "Unranked", points: "", meta: "" };
 }
 
-function rankCard(row) {
+// League colors for the emblems. Identity only: they never encode win or loss.
+const LEAGUE_COLORS = { Rookie: "#8f8d86", Iron: "#646a73", Bronze: "#b0693a", Silver: "#9aa5b1", Gold: "#d39c17", Platinum: "#2b9f96", Diamond: "#5a7cf0", Master: "#a64fd0" };
+const TIER_SHORT = { Master: "M", "High Master": "HM", "Grand Master": "GM", "Ultimate Master": "UM" };
+
+function leagueOf(info) {
+  if (!info) return null;
+  if (info.master_tier) return "Master";
+  return info.league || null;
+}
+
+function inkOn(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const lin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  const L = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+  return L > 0.3 ? "#0b0b0b" : "#ffffff";
+}
+
+/** A league shield with the division number (or Master tier) inside. */
+function emblem(info, size = 40) {
+  const NS = "http://www.w3.org/2000/svg";
+  const league = leagueOf(info);
+  const color = LEAGUE_COLORS[league] || "#8f8d86";
+  const name = info ? (info.master_tier || info.division || "Unranked") : "Unranked";
+  const label = !league ? "?" : info.master_tier ? TIER_SHORT[info.master_tier] : league === "Master" ? "M" : (info.division || "").split(" ")[1] || "";
+  const svg = document.createElementNS(NS, "svg");
+  const set = (el, attrs) => { for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); return el; };
+  set(svg, { viewBox: "0 0 40 44", width: size, height: Math.round(size * 1.1), class: "emblem", role: "img", "aria-label": name });
+  svg.append(
+    set(document.createElementNS(NS, "path"), { d: "M20 2 L37 8.5 V22 C37 32 29.5 39 20 42 C10.5 39 3 32 3 22 V8.5 Z", fill: color }),
+    set(document.createElementNS(NS, "path"), { d: "M20 6.5 L33 11.5 V22 C33 29.5 27.5 35 20 37.5 C12.5 35 7 29.5 7 22 V11.5 Z", fill: "none", stroke: inkOn(color) === "#ffffff" ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.25)", "stroke-width": "1.5" }),
+  );
+  const t = set(document.createElementNS(NS, "text"), { x: "20", y: "27.5", "text-anchor": "middle", fill: inkOn(color), "font-size": label.length > 1 ? "12" : "16", "font-weight": "700", "font-family": "system-ui, sans-serif" });
+  t.textContent = label;
+  svg.append(t);
+  return svg;
+}
+
+function emblemFromName(name) {
+  if (TIER_SHORT[name]) return { master_tier: name };
+  return { league: name.split(" ")[0], division: name };
+}
+
+function meter(info, label) {
+  if (!info || info.progress === null || info.progress === undefined) return null;
+  return h("div", { class: "meter", role: "meter", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(info.progress * 100)), "aria-label": label },
+    h("div", { style: `width:${Math.max(2, info.progress * 100)}%` }));
+}
+
+function peakText(row) {
+  return row.peak_mr ? `Peak ${fmtNum(row.peak_mr)} MR` : row.peak_lp ? `Peak ${fmtNum(row.peak_lp)} LP` : "";
+}
+
+/** The big card for the character the dashboard is about. */
+function rankMain(row) {
   const r = rankHeadline(row.current);
-  const peak = row.peak_mr ? `Peak ${fmtNum(row.peak_mr)} MR` : row.peak_lp ? `Peak ${fmtNum(row.peak_lp)} LP` : "";
-  return h("div", { class: "card rank-card" },
-    h("div", { class: "top" }, h("span", { class: "char", text: row.character }), h("span", { class: "points", text: `${record(row)} · ${fmtPct(row.win_rate)}` })),
-    h("div", { class: "division", text: r.title }),
-    h("div", { class: "points", text: r.points }),
-    row.current && row.current.progress !== null
-      ? h("div", { class: "meter", role: "meter", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(row.current.progress * 100)), "aria-label": r.meta },
-        h("div", { style: `width:${Math.max(2, row.current.progress * 100)}%` }))
-      : h("div", { style: "height:24px" }),
-    h("div", { class: "meta" }, h("span", { text: r.meta }), h("span", { text: peak })));
+  return h("div", { class: "card rank-main" },
+    emblem(row.current, 64),
+    h("div", { class: "body" },
+      h("div", { class: "eyebrow", text: `${row.character} · ${record(row)} · ${fmtPct(row.win_rate)} win rate` }),
+      h("div", { class: "division", text: r.title }),
+      h("div", { class: "points", text: r.points }),
+      meter(row.current, r.meta),
+      h("div", { class: "meta" }, h("span", { text: r.meta }), h("span", { text: peakText(row) }))));
+}
+
+/** A compact card for your other characters; click to focus on that character. */
+function rankMini(row) {
+  const r = rankHeadline(row.current);
+  return h("button", { class: "card rank-mini", type: "button", style: "text-align:left;cursor:pointer;width:100%", title: `Show only ${row.character}`,
+    onclick: () => { $("#f-char").value = row.character; state.rankMetric = null; loadStats(); } },
+    emblem(row.current, 34),
+    h("div", { style: "min-width:0" },
+      h("div", { class: "char", text: `${row.character} · ${record(row)}` }),
+      h("div", { class: "division", text: r.title }),
+      h("div", { class: "points", text: r.points })));
+}
+
+function gapBanner() {
+  const g = state.stats.gaps;
+  if (!g || !g.count) return null;
+  const last = g.items[g.items.length - 1];
+  const jump = last.lp !== null ? `${fmtSigned(last.lp)} LP` : `${fmtSigned(last.mr)} MR`;
+  return h("div", { class: "card banner", role: "status" },
+    h("p", {}, h("strong", { text: "Some matches may be missing. " }),
+      `In the last ${g.days} days your rating jumped by more than one match can explain ${g.count === 1 ? "once" : `${g.count} times`} (latest: ${last.character}, ${jump}, ${fmtDate(last.t)}). `,
+      "Buckler only keeps your most recent matches, so sync after every session. (An MR season reset can also cause this.)"));
+}
+
+function tipsCard() {
+  const tips = state.stats.insights || [];
+  if (!tips.length) return null;
+  const tag = { warn: "Work on", good: "Strength", info: "Note" };
+  return card("Tips from your stats", "Based on the matches in the current filter. Click one for the details.",
+    h("div", { class: "tips" }, tips.map((t) => h("button", { class: `tip ${t.tone}`, type: "button", onclick: () => selectTab(t.tab) },
+      h("span", { class: "tip-tag", text: tag[t.tone] || "Note" }),
+      h("div", {}, h("strong", { text: t.title }), h("p", { text: t.text })),
+      h("span", { class: "tip-go", "aria-hidden": "true", text: "→" })))));
 }
 
 // =====================================================================================
@@ -487,10 +578,18 @@ function renderOverview(panel) {
   const cur = st.current.type ? `${st.current.length} ${st.current.type === "W" ? "win" : "loss"}${st.current.length === 1 ? "" : st.current.type === "W" ? "s" : "es"}` : "—";
   const mrFirst = s.net_mr !== null && (s.net_lp === null || state.stats.rank.current?.master_tier);
   const lpOrMr = mrFirst
-    ? tile("Net MR", deltaNode(s.net_mr), s.net_lp !== null ? `and ${fmtSigned(s.net_lp)} LP on other characters` : `${fmtSigned(s.avg_mr)} per match`)
+    ? tile("Net MR", deltaNode(s.net_mr), s.net_lp !== null && s.net_lp !== 0 ? `and ${fmtSigned(s.net_lp)} LP on other characters` : `${fmtSigned(s.avg_mr)} per match`)
     : tile("Net LP", deltaNode(s.net_lp), s.net_mr !== null ? `and ${fmtSigned(s.net_mr)} MR in Master` : s.avg_lp !== null ? `${fmtSigned(s.avg_lp)} per match` : "");
 
+  // Your main character (the filtered one, or the most played) leads; the rest sit beside it.
+  const mainName = state.stats.rank.character;
+  const main = o.characters.find((c) => c.character === mainName) || o.characters[0];
+  const others = o.characters.filter((c) => c !== main);
   panel.append(
+    gapBanner() || "",
+    h("div", { class: others.length ? "rank-strip" : "" },
+      main ? rankMain(main) : null,
+      others.length ? h("div", { class: "others" }, others.slice(0, 4).map(rankMini)) : null),
     h("div", { class: "kpis" },
       tile("Win rate", fmtPct(s.win_rate), `${record(s)}`, { hero: true }),
       tile("Ranked matches", fmtNum(s.matches), `${fmtNum(s.rounds_won + s.rounds_lost)} rounds played`),
@@ -498,7 +597,7 @@ function renderOverview(panel) {
       lpOrMr,
       tile("Current streak", cur, st.longest_win.length ? `Best: ${st.longest_win.length} wins in a row` : ""),
     ),
-    h("div", { class: "rank-cards" }, o.characters.map(rankCard)),
+    tipsCard() || "",
   );
 
   const rolling = o.rolling;
@@ -555,6 +654,9 @@ function renderRank(panel) {
     state.rankMetric = r.current && r.current.master_tier && hasMR ? "mr" : hasLP ? "lp" : "mr";
   }
 
+  const banner = gapBanner();
+  if (banner) panel.append(banner);
+
   if (!$("#f-char").value && r.characters.length > 1) {
     panel.append(h("div", { class: "card" },
       h("div", { class: "chips" },
@@ -572,7 +674,7 @@ function renderRank(panel) {
   const peak = Math.max(...pts.flatMap((p) => (useMR ? [p.mr, p.mr_before] : [p.lp, p.lp_before])).filter((v) => v !== null));
   const unit = useMR ? "MR" : "LP";
   panel.append(h("div", { class: "kpis" },
-    tile(`${r.character} rank`, head.title, `${head.points}${head.meta ? ` · ${head.meta}` : ""}`),
+    tile(`${r.character} rank`, h("span", { class: "with-emblem" }, emblem(r.current, 30), head.title), `${head.points}${head.meta ? ` · ${head.meta}` : ""}`),
     tile(`Net ${unit} in range`, deltaNode(useMR ? r.summary.net_mr : r.summary.net_lp), `${fmtNum(ds.length)} matches with a known change`),
     tile(`Peak ${unit}`, Number.isFinite(peak) ? fmtNum(peak) : "—", "in this range"),
     tile("Avg gain per win", gains.length ? fmtSigned(avg(gains)) : "—", `${unit} · ${gains.length} gains`),
@@ -589,8 +691,8 @@ function renderRank(panel) {
     const series = pts.map((p) => ({ x: p.game, y: p[key] ?? null, p }));
     const valid = series.filter((s) => s.y !== null);
     const lines = metric === "lp"
-      ? DIVISIONS.map(([name, floor]) => ({ value: floor, label: name, strong: name.endsWith(" 1") || name === "Master" }))
-      : MASTER_TIERS.map(([name, floor]) => ({ value: floor, label: name, strong: true }));
+      ? DIVISIONS.map(([name, floor]) => ({ value: floor, label: name, strong: name.endsWith(" 1") || name === "Master", color: LEAGUE_COLORS[name.split(" ")[0]] }))
+      : MASTER_TIERS.map(([name, floor]) => ({ value: floor, label: name, strong: true, color: LEAGUE_COLORS.Master }));
     const color = winColor();
     return chartCard({
       title: metric === "lp" ? "League Points over time" : "Master Rate over time",
@@ -684,6 +786,7 @@ function renderRank(panel) {
   panel.append(card("Promotions and demotions", `Every time ${r.character} changed division or Master tier in this range`,
     ev.length ? h("ul", { class: "events" }, ev.map((e) => h("li", {},
       h("span", { class: `pill ${e.up ? "W" : "L"}`, text: e.up ? "▲" : "▼", "aria-label": e.up ? "Promoted" : "Demoted" }),
+      emblem(emblemFromName(e.to), 22),
       h("span", {}, `${e.from} → `, h("strong", { text: e.to })),
       h("time", { text: fmtDate(e.t) })))) : noData("No rank changes in this range.")));
 }
@@ -991,81 +1094,197 @@ async function deleteMatch(m) {
 }
 
 // ---- Sync --------------------------------------------------------------------------
-function renderSync(panel) {
+function lastOkSync() {
+  const ok = ((state.meta && state.meta.syncs) || []).find((x) => x.status === "ok");
+  return ok ? ok.at : null;
+}
+
+function ago(t) {
+  const secs = Date.now() / 1000 - t;
+  if (secs < 90) return "just now";
+  if (secs < 3600) return `${Math.round(secs / 60)} min ago`;
+  if (secs < 48 * 3600) return `${Math.round(secs / 3600)} h ago`;
+  return `${Math.round(secs / 86400)} days ago`;
+}
+
+const syncReady = () => !!(state.meta && state.meta.config.sid && state.meta.config.cookie_set);
+
+/** The status pill in the header: last sync, staleness, failures, one-click sync. */
+function renderSyncStatus() {
+  if (!state.meta) return;
+  const box = $("#sync-status");
   const cfg = state.meta.config;
-  const timing = state.stats ? state.stats.timing : null;
+  const last = lastOkSync();
+  const latest = state.meta.syncs[0];
+  let st, msg, title = "";
+  if (state.syncing) { st = "busy"; msg = "Syncing…"; }
+  else if (state.meta.auto_sync_paused) { st = "error"; msg = "Auto sync paused"; title = state.meta.auto_sync_paused; }
+  else if (!cfg.sid || (!cfg.cookie_set && !state.meta.match_count)) { st = "setup"; msg = "Sync isn't set up"; }
+  else if (latest && latest.status === "error") { st = "error"; msg = "Last sync failed"; title = latest.message || ""; }
+  else if (!last) { st = "setup"; msg = "Not synced yet"; }
+  else { st = Date.now() / 1000 - last > 86400 ? "stale" : "ok"; msg = `Synced ${ago(last)}`; }
+  box.dataset.state = st;
+  box.title = title;
+  $("#sync-text").textContent = msg;
+  const btn = $("#sync-btn");
+  btn.textContent = state.syncing ? "Syncing…" : syncReady() ? "Sync now" : (cfg.sid && state.meta.match_count ? "Sync" : "Set up");
+  btn.disabled = !!state.syncing;
+}
 
-  // Profile
-  const sidInput = h("input", { type: "text", value: cfg.sid || "", placeholder: "e.g. 1234567890 or your profile URL", style: "min-width:280px" });
-  const sidStatus = h("span", { class: "status" });
-  panel.append(card("1. Your Buckler profile", "Your user code is the number at the end of your Buckler profile URL: streetfighter.com/6/buckler/profile/<user code>",
-    h("div", { class: "form-actions" }, sidInput,
-      h("button", { class: "btn", type: "button", text: "Save", onclick: async () => {
-        try { await api("/api/config", { method: "POST", body: JSON.stringify({ sid: sidInput.value }) }); await loadMeta(); render(); toast("User code saved."); }
-        catch (e) { sidStatus.className = "status error"; sidStatus.textContent = e.message; }
-      } }), sidStatus)));
+function sidForm(onSaved) {
+  const cfg = state.meta.config;
+  const input = h("input", { type: "text", value: cfg.sid || "", placeholder: "1234567890 or your profile URL", style: "min-width:260px;flex:1", "aria-label": "Buckler user code or profile URL" });
+  const status = h("span", { class: "status" });
+  const save = async () => {
+    try {
+      await api("/api/config", { method: "POST", body: JSON.stringify({ sid: input.value }) });
+      await loadMeta();
+      if (!state.meta.config.sid) throw new Error("That doesn't look like a user code. It's the long number at the end of your profile URL.");
+      toast("User code saved.");
+      onSaved && onSaved();
+      render();
+    } catch (e) { status.className = "status error"; status.textContent = e.message; }
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") save(); });
+  return h("div", {},
+    h("p", { class: "summary", text: "Open your profile on Buckler's Boot Camp and copy the address. The user code is the number at the end: streetfighter.com/6/buckler/profile/<user code>." }),
+    h("div", { class: "form-actions" }, input, h("button", { class: "btn btn-primary", type: "button", text: "Save", onclick: save }), status));
+}
 
-  // Cookie sync
-  const cookieInput = h("input", { type: "password", placeholder: cfg.cookie_set ? "A cookie is saved. Paste a new one to replace it." : "Paste the Cookie header (or just the buckler_id value)", style: "flex:1;min-width:260px", autocomplete: "off" });
-  const syncStatus = h("span", { class: "status" });
-  const syncBtn = h("button", { class: "btn btn-primary", type: "button", text: "Sync now", disabled: !(cfg.sid && cfg.cookie_set) });
-  syncBtn.addEventListener("click", () => runSync(syncBtn, syncStatus));
-  const auto = h("select", {}, [[0, "Off"], [10, "Every 10 minutes"], [20, "Every 20 minutes"], [30, "Every 30 minutes"], [60, "Every hour"]].map(([v, t]) => h("option", { value: v, text: t, selected: Number(cfg.auto_sync_minutes) === v })));
-  auto.addEventListener("change", async () => { await api("/api/config", { method: "POST", body: JSON.stringify({ auto_sync_minutes: Number(auto.value) }) }); await loadMeta(); toast("Auto sync updated."); });
-  panel.append(card("2. Sync with your Buckler cookie", "One click (or automatic) sync. The cookie is stored only in this app's data folder and is sent only to streetfighter.com.",
-    h("ol", { class: "steps" },
-      h("li", {}, "Log in at ", h("a", { href: "https://www.streetfighter.com/6/buckler", target: "_blank", rel: "noopener", text: "streetfighter.com/6/buckler" }), " in your browser."),
-      h("li", {}, "Press ", h("kbd", { text: "F12" }), ", open the ", h("strong", { text: "Network" }), " tab and reload the page."),
-      h("li", {}, "Click the first request, find ", h("strong", { text: "Request Headers → Cookie" }), " and copy its whole value. (Or copy just the ", h("code", { text: "buckler_id" }), " cookie from Application → Cookies.)"),
-      h("li", {}, "Paste it below and save, then press Sync now. Cookies expire after a few weeks; repeat this when sync says so.")),
-    h("form", { class: "form-actions", onsubmit: (e) => e.preventDefault() }, cookieInput,
-      h("button", { class: "btn", type: "button", text: "Save cookie", onclick: async () => {
-        if (!cookieInput.value.trim()) return;
-        await api("/api/config", { method: "POST", body: JSON.stringify({ cookie: cookieInput.value }) });
-        cookieInput.value = "";
-        await loadMeta(); render(); toast("Cookie saved.");
-      } }),
-      cfg.cookie_set ? h("button", { class: "btn btn-danger", type: "button", text: "Forget cookie", onclick: async () => { await api("/api/config", { method: "POST", body: JSON.stringify({ cookie: "", auto_sync_minutes: 0 }) }); await loadMeta(); render(); } }) : null),
-    h("div", { class: "form-actions" }, syncBtn, field("Auto sync while the tracker runs", auto), syncStatus),
-    state.meta.auto_sync_paused ? h("p", { class: "status error", text: `Auto sync paused: ${state.meta.auto_sync_paused}` }) : null,
-    h("p", { class: "note", text: "Buckler only keeps your most recent matches (about 100), so sync at least once per play session. The tracker keeps everything it has seen." })));
+function cookieSteps() {
+  return h("ol", { class: "steps" },
+    h("li", {}, "Log in at ", h("a", { href: "https://www.streetfighter.com/6/buckler", target: "_blank", rel: "noopener", text: "streetfighter.com/6/buckler" }), "."),
+    h("li", {}, "Press ", h("kbd", { text: "F12" }), ", open the ", h("strong", { text: "Network" }), " tab and reload the page."),
+    h("li", {}, "Click the first request and copy the whole value of ", h("strong", { text: "Request Headers → Cookie" }), ". (Or copy just the ", h("code", { text: "buckler_id" }), " cookie from Application → Cookies.)"));
+}
 
-  // Browser collector
-  const fileInput = h("input", { type: "file", accept: "application/json,.json" });
-  const importStatus = h("span", { class: "status" });
+function cookieForm(after) {
+  const cfg = state.meta.config;
+  const input = h("input", { type: "password", placeholder: cfg.cookie_set ? "Paste a new cookie to replace the saved one" : "Paste the cookie here", style: "flex:1;min-width:220px", autocomplete: "off", "aria-label": "Buckler cookie" });
+  return h("form", { class: "form-actions", onsubmit: (e) => e.preventDefault() }, input,
+    h("button", { class: "btn btn-primary", type: "button", text: "Save cookie", onclick: async () => {
+      if (!input.value.trim()) { toast("Paste the cookie first."); return; }
+      await api("/api/config", { method: "POST", body: JSON.stringify({ cookie: input.value }) });
+      input.value = "";
+      await loadMeta();
+      toast("Cookie saved. It stays on this computer.");
+      after && after();
+      render();
+    } }),
+    cfg.cookie_set ? h("button", { class: "btn btn-danger", type: "button", text: "Forget cookie", onclick: async () => {
+      await api("/api/config", { method: "POST", body: JSON.stringify({ cookie: "", auto_sync_minutes: 0 }) });
+      await loadMeta(); render(); toast("Cookie removed.");
+    } }) : null);
+}
+
+function bookmarkBlock() {
   const bm = h("a", { class: "bookmarklet", href: "#", text: "SF6 Tracker: collect", title: "Drag me to your bookmarks bar" });
-  bm.addEventListener("click", (e) => { e.preventDefault(); toast("Drag this button to your bookmarks bar, then click it while on Buckler's Boot Camp."); });
-  const copyBtn = h("button", { class: "btn", type: "button", text: "Copy collector script" });
+  bm.addEventListener("click", (e) => { e.preventDefault(); toast("Drag this button to your bookmarks bar, then click it while you're on Buckler's Boot Camp."); });
+  const copyBtn = h("button", { class: "btn btn-small", type: "button", text: "copy the script" });
   api("/api/collector").then(({ script }) => {
     bm.href = `javascript:${encodeURIComponent(script)}`;
     copyBtn.onclick = async () => {
-      try { await navigator.clipboard.writeText(script); toast("Collector copied. Paste it into the browser console on Buckler."); }
+      try { await navigator.clipboard.writeText(script); toast("Copied. Paste it into the browser console on Buckler."); }
       catch (e) { toast("Couldn't copy automatically; drag the bookmark button instead."); }
     };
   }).catch(() => {});
-  panel.append(card("3. Or: collect from your browser", "Use this if cookie sync is blocked by Capcom's bot protection. It runs inside your logged-in Buckler tab, so no cookie is needed.",
-    h("ol", { class: "steps" },
-      h("li", {}, "Drag this to your bookmarks bar: ", bm, " (or use ", copyBtn, " and paste it into the browser console)."),
-      h("li", {}, "Open your Buckler's Boot Camp profile while logged in and click the bookmark."),
-      h("li", {}, "It reads your ranked battle log and sends it here. If your browser blocks that, it downloads a file instead: import it below.")),
-    h("div", { class: "form-actions" }, fileInput,
-      h("button", { class: "btn", type: "button", text: "Import file", onclick: async () => {
-        const f = fileInput.files[0];
-        if (!f) return;
-        importStatus.className = "status";
-        importStatus.textContent = "Importing…";
-        try {
-          const body = await f.text();
-          const rep = await api("/api/import", { method: "POST", body });
-          importStatus.textContent = `${rep.ranked} ranked matches in file, ${rep.added} new added.`;
-          await reloadAll();
-        } catch (e) {
-          importStatus.className = "status error";
-          importStatus.textContent = e.message;
-        }
-      } }), importStatus)));
+  return h("ol", { class: "steps" },
+    h("li", {}, "Drag ", bm, " to your bookmarks bar (or ", copyBtn, " and paste it into the browser console)."),
+    h("li", {}, "Open your Buckler profile while logged in and click the bookmark."),
+    h("li", {}, "It sends your ranked matches here. If your browser blocks that, it downloads a file; import it below."));
+}
+
+function importBlock() {
+  const fileInput = h("input", { type: "file", accept: "application/json,.json", "aria-label": "Battle log file" });
+  const status = h("span", { class: "status" });
+  return h("div", { class: "form-actions" }, fileInput,
+    h("button", { class: "btn", type: "button", text: "Import file", onclick: async () => {
+      const f = fileInput.files[0];
+      if (!f) { status.className = "status error"; status.textContent = "Choose a file first."; return; }
+      status.className = "status"; status.textContent = "Importing…";
+      try {
+        const rep = await api("/api/import", { method: "POST", body: await f.text() });
+        status.textContent = `${rep.ranked} ranked matches in the file, ${rep.added} new.`;
+        await reloadAll();
+      } catch (e) { status.className = "status error"; status.textContent = e.message; }
+    } }), status);
+}
+
+function autoSyncField() {
+  const cfg = state.meta.config;
+  const sel = h("select", {}, [[0, "Off"], [10, "Every 10 minutes"], [20, "Every 20 minutes"], [30, "Every 30 minutes"], [60, "Every hour"]]
+    .map(([v, t]) => h("option", { value: v, text: t, selected: Number(cfg.auto_sync_minutes) === v })));
+  sel.addEventListener("change", async () => {
+    await api("/api/config", { method: "POST", body: JSON.stringify({ auto_sync_minutes: Number(sel.value) }) });
+    await loadMeta(); toast(Number(sel.value) ? "Auto sync on. It runs while the tracker is open." : "Auto sync off.");
+  });
+  return field("Auto sync while the tracker runs", sel);
+}
+
+function step(num, title, status, summary, body) {
+  return h("div", { class: `step ${status}` },
+    h("div", { class: "step-num", "aria-hidden": "true", text: status === "done" ? "✓" : String(num) }),
+    h("div", {},
+      h("h3", {}, title, status === "done" ? h("span", { class: "sr-only", text: " (done)" }) : null),
+      summary ? h("p", { class: "summary" }, summary) : null,
+      status === "active" ? h("div", { class: "step-body" }, body) : null));
+}
+
+function renderSync(panel) {
+  const cfg = state.meta.config;
+  const hasMatches = state.meta.match_count > 0;
+  const s1 = !!cfg.sid && !state.editSid;
+  const s2 = cfg.cookie_set || state.useBookmark || hasMatches;
+  const s3 = hasMatches;
+
+  if (!s1 || !s3) {
+    // ---- first-run wizard ----
+    const st = (done, prevDone) => (done ? "done" : prevDone ? "active" : "pending");
+    const status = h("span", { class: "status" });
+    const syncNow = h("button", { class: "btn btn-primary", type: "button", text: "Sync now", onclick: (e) => runSync(e.currentTarget, status) });
+    panel.append(card("Set up syncing", "Three steps. You only do this once.", h("div", { class: "wizard" },
+      step(1, "Find your Buckler profile", st(s1, true),
+        s1 ? h("span", {}, `User code ${cfg.sid}. `, h("a", { href: "#", text: "Change", onclick: (e) => { e.preventDefault(); state.editSid = true; render(); } })) : null,
+        sidForm(() => { state.editSid = false; })),
+      step(2, "Connect to Buckler", st(s2 && s1, s1),
+        s2 && s1 ? (cfg.cookie_set ? "Connected with your Buckler cookie." : "Using the browser bookmark.") : null,
+        h("div", { class: "methods" },
+          h("div", { class: "method" },
+            h("h4", {}, "Cookie sync", h("span", { class: "tag", text: "Recommended" })),
+            h("p", { class: "summary", text: "One-click and automatic syncing. Your cookie stays on this computer and is only sent to streetfighter.com." }),
+            cookieSteps(), cookieForm()),
+          h("div", { class: "method" },
+            h("h4", {}, "Browser bookmark", h("span", { class: "tag", text: "If cookie sync is blocked" })),
+            h("p", { class: "summary", text: "Runs inside your logged-in Buckler tab, so no cookie is needed. You click it each time you want to sync." }),
+            h("button", { class: "btn", type: "button", text: "Use the bookmark instead", onclick: () => { state.useBookmark = true; render(); } })))),
+      step(3, "Get your matches", st(s3, s1 && s2), null,
+        cfg.cookie_set
+          ? h("div", {}, h("p", { class: "summary", text: "Pull your recent ranked matches from Buckler. It takes a few seconds per page." }), h("div", { class: "form-actions" }, syncNow, status))
+          : h("div", {}, bookmarkBlock(), importBlock())),
+    )));
+  } else {
+    // ---- day-to-day sync panel ----
+    const status = h("span", { class: "status" });
+    const last = lastOkSync();
+    panel.append(card("Sync", null,
+      h("div", { class: "sync-head" },
+        h("div", {}, h("div", { class: "big", text: last ? `Synced ${ago(last)}` : "Not synced yet" }),
+          h("div", { class: "summary muted", text: `${fmtNum(state.meta.match_count)} ranked matches stored · user code ${cfg.sid}` })),
+        cfg.cookie_set ? h("button", { class: "btn btn-primary", type: "button", text: "Sync now", onclick: (e) => runSync(e.currentTarget, status) }) : null,
+        cfg.cookie_set ? autoSyncField() : null),
+      status,
+      state.meta.auto_sync_paused ? h("p", { class: "status error", text: `Auto sync paused: ${state.meta.auto_sync_paused}` }) : null,
+      h("p", { class: "note", text: "Buckler only keeps your most recent matches, so sync after every session (or turn on auto sync). Matches already stored are never added twice." }),
+      h("details", { class: "more", open: !cfg.cookie_set ? true : null }, h("summary", { text: cfg.cookie_set ? "Replace your Buckler cookie" : "Set up cookie sync (one click, automatic)" }), cookieSteps(), cookieForm()),
+      h("details", { class: "more", open: cfg.cookie_set ? null : true }, h("summary", { text: "Browser bookmark and file import" }), bookmarkBlock(), importBlock()),
+      h("details", { class: "more" }, h("summary", { text: "Change your user code" }), sidForm()),
+    ));
+  }
+
+  if (!hasMatches) return;   // settings and history only matter once there's data
 
   // Settings
+  const timing = state.stats ? state.stats.timing : null;
   const timingSel = h("select", {}, [["auto", "Detect automatically"], ["pre", "Before the match"], ["post", "After the match"]].map(([v, t]) => h("option", { value: v, text: t, selected: cfg.lp_timing === v })));
   const gapInput = h("input", { type: "number", min: "5", max: "600", value: cfg.session_gap_minutes, style: "width:100px" });
   const detected = timing && timing.pairs
@@ -1081,35 +1300,39 @@ function renderSync(panel) {
       } })),
     h("p", { class: "note", text: detected })));
 
-  // History
   const syncs = state.meta.syncs;
-  panel.append(card("Sync history", null, syncs.length ? table([
-    { key: "at", label: "When", format: (r) => fmtDate(r.at) },
-    { key: "source", label: "How" },
-    { key: "status", label: "Result", format: (r) => (r.status === "ok" ? "OK" : "Failed") },
-    { key: "added", label: "New matches", num: true },
-    { key: "message", label: "Details", format: (r) => h("span", { style: "white-space:normal", text: r.message || "" }) },
-  ], syncs, { sortKey: "at", sortDir: "desc" }) : noData("Nothing synced yet.")));
+  if (syncs.length) {
+    panel.append(card("Sync history", null, table([
+      { key: "at", label: "When", format: (r) => fmtDate(r.at) },
+      { key: "source", label: "How" },
+      { key: "status", label: "Result", format: (r) => (r.status === "ok" ? "OK" : "Failed") },
+      { key: "added", label: "New matches", num: true },
+      { key: "message", label: "Details", format: (r) => h("span", { style: "white-space:normal", text: r.message || "" }) },
+    ], syncs, { sortKey: "at", sortDir: "desc" })));
+  }
 }
 
 async function runSync(btn, statusEl) {
-  btn.disabled = true;
-  const label = btn.textContent;
-  btn.textContent = "Syncing…";
-  if (statusEl) { statusEl.className = "status"; statusEl.textContent = "Reading your ranked battle log from Buckler. This takes a few seconds per page."; }
+  if (state.syncing) return;
+  state.syncing = true;
+  renderSyncStatus();
+  if (btn) btn.disabled = true;
+  if (statusEl) { statusEl.className = "status"; statusEl.textContent = "Reading your ranked battle log from Buckler…"; }
   try {
     const rep = await api("/api/sync", { method: "POST" });
-    const msg = `Synced: ${rep.added} new ranked match${rep.added === 1 ? "" : "es"} (${rep.pages} page${rep.pages === 1 ? "" : "s"} read).`;
+    const msg = rep.added ? `Synced: ${rep.added} new ranked match${rep.added === 1 ? "" : "es"}.` : "Synced: no new matches since last time.";
     if (statusEl) statusEl.textContent = msg;
     toast(msg);
+    state.syncing = false;
     await reloadAll();
   } catch (e) {
     if (statusEl) { statusEl.className = "status error"; statusEl.textContent = e.message; }
     toast(`Sync failed: ${e.message}`, 6000);
     await loadMeta().catch(() => {});
   } finally {
-    btn.disabled = false;
-    btn.textContent = label;
+    state.syncing = false;
+    if (btn) btn.disabled = false;
+    renderSyncStatus();
   }
 }
 
@@ -1159,7 +1382,8 @@ function init() {
   $("#f-from").addEventListener("change", loadStats);
   $("#f-to").addEventListener("change", loadStats);
   $("#f-char").addEventListener("change", () => { state.rankMetric = null; loadStats(); });
-  $("#quick-sync").addEventListener("click", (e) => runSync(e.currentTarget, null));
+  $("#sync-btn").addEventListener("click", () => (syncReady() ? runSync(null, null) : selectTab("sync")));
+  setInterval(renderSyncStatus, 60000);
   $("#theme-toggle").addEventListener("click", () => {
     const dark = document.documentElement.dataset.theme
       ? document.documentElement.dataset.theme === "dark"

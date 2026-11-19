@@ -26,6 +26,11 @@
       <button role="tab" data-tab="matches">Matches</button>
       <button role="tab" data-tab="sync">Sync</button>
     </nav>
+    <div class="sync-status" id="sync-status" aria-live="polite">
+      <span class="sync-dot" aria-hidden="true"></span>
+      <span class="sync-text" id="sync-text">Loading…</span>
+      <button class="btn btn-small" type="button" id="sync-btn">Sync</button>
+    </div>
     <button class="icon-btn" id="theme-toggle" title="Switch light / dark" aria-label="Switch light or dark theme">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
     </button>
@@ -50,7 +55,6 @@
       <select id="f-char"><option value="">All characters</option></select>
     </label>
     <div class="filter-note" id="filter-note"></div>
-    <button class="btn btn-primary" id="quick-sync" hidden>Sync now</button>
   </section>
 
   <main id="main">

@@ -18,6 +18,9 @@
   --focus: #2a78d6;
   --shadow: 0 1px 2px rgba(11, 11, 11, 0.05);
   --radius: 10px;
+  --status-warn: #fab219;
+  --status-good: #0ca30c;
+  --status-bad: #d03b3b;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
@@ -186,7 +189,7 @@ main.loading .panel { opacity: 0.55; transition: opacity 0.15s; }
 .rank-card .points { color: var(--text-2); font-size: 13px; }
 .meter { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; margin: 10px 0 6px; }
 .meter > div { height: 100%; border-radius: 4px; background: var(--accent); }
-.rank-card .meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; gap: 8px; flex-wrap: wrap; }
+.rank-card .meta, .rank-main .meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; gap: 8px; flex-wrap: wrap; }
 
 /* ---- form strip ------------------------------------------------------------------- */
 .form-strip { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -240,3 +243,71 @@ code, kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-si
   background: var(--text); color: var(--surface); padding: 10px 16px; border-radius: 8px;
   font-size: 13px; z-index: 50; max-width: min(560px, calc(100vw - 32px));
 }
+
+/* ---- header sync status ----------------------------------------------------------- */
+.sync-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); white-space: nowrap; flex: none; }
+.sync-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--status-good); flex: none; }
+.sync-status[data-state="stale"] .sync-dot { background: var(--status-warn); }
+.sync-status[data-state="error"] .sync-dot { background: var(--status-bad); }
+.sync-status[data-state="setup"] .sync-dot, .sync-status[data-state="busy"] .sync-dot { background: var(--neutral); }
+.sync-status[data-state="busy"] .sync-dot { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.3; } }
+@media (max-width: 760px) { .sync-text { display: none; } }
+
+/* ---- emblems and rank cards ------------------------------------------------------- */
+.emblem { flex: none; display: block; }
+.with-emblem { display: inline-flex; align-items: center; gap: 10px; }
+.rank-strip { display: grid; gap: 12px; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: stretch; }
+.rank-strip .others { display: grid; gap: 12px; align-content: start; }
+@media (max-width: 900px) { .rank-strip { grid-template-columns: 1fr; } }
+.rank-main { display: flex; gap: 18px; align-items: center; }
+.rank-main .body { flex: 1; min-width: 0; }
+.rank-main .division { font-size: 30px; font-weight: 650; margin: 2px 0; letter-spacing: -0.01em; }
+.rank-main .points { color: var(--text-2); font-size: 13px; }
+.rank-main .eyebrow { color: var(--text-2); font-size: 12px; font-weight: 500; }
+.rank-mini { display: flex; gap: 12px; align-items: center; }
+.rank-mini .division { font-size: 16px; font-weight: 650; margin: 0; }
+.rank-mini .points { font-size: 12px; }
+.rank-mini .char { font-size: 13px; }
+
+/* ---- tips ------------------------------------------------------------------------- */
+.tips { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.tip {
+  display: flex; gap: 12px; align-items: flex-start; text-align: left; width: 100%;
+  background: var(--surface-2); border: 1px solid transparent; border-radius: 8px; padding: 12px; cursor: pointer;
+}
+.tip:hover { border-color: var(--border); }
+.tip strong { display: block; font-size: 13px; margin-bottom: 2px; }
+.tip p { margin: 0; color: var(--text-2); font-size: 13px; }
+.tip-tag { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--text-2); white-space: nowrap; padding-top: 2px; min-width: 64px; }
+.tip-tag::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.tip.warn .tip-tag::before { background: var(--status-warn); }
+.tip.good .tip-tag::before { background: var(--status-good); }
+.tip-go { margin-left: auto; color: var(--muted); }
+.banner { display: flex; gap: 12px; align-items: flex-start; border-left: 3px solid var(--status-warn); border-radius: 0; }
+.banner p { margin: 0; color: var(--text-2); }
+.banner strong { color: var(--text); }
+
+/* ---- setup wizard ----------------------------------------------------------------- */
+.wizard { display: flex; flex-direction: column; gap: 0; }
+.step { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 14px; padding: 14px 0; border-top: 1px solid var(--grid); }
+.step:first-of-type { border-top: 0; }
+.step-num {
+  width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 13px; font-weight: 650; background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border);
+}
+.step.active .step-num { background: var(--accent); color: #fff; border-color: transparent; }
+.step.done .step-num { background: var(--surface-2); color: var(--status-good); }
+.step h3 { font-size: 14px; margin: 3px 0 2px; }
+.step.pending h3 { color: var(--muted); }
+.step .summary { color: var(--text-2); font-size: 13px; margin: 0; }
+.step .step-body { margin-top: 10px; }
+.methods { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: 4px; }
+.method { border: 1px solid var(--border); border-radius: 8px; padding: 14px; background: var(--surface); }
+.method h4 { margin: 0 0 4px; font-size: 13px; }
+.method .tag { font-size: 11px; color: var(--text-2); background: var(--surface-2); border-radius: 4px; padding: 1px 6px; margin-left: 6px; font-weight: 500; }
+details.more { border-top: 1px solid var(--grid); padding-top: 10px; margin-top: 12px; }
+details.more summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--text-2); }
+details.more[open] summary { margin-bottom: 10px; }
+.sync-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.sync-head .big { font-size: 18px; font-weight: 650; }

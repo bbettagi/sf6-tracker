@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
@@ -61,11 +62,13 @@ def annotate(matches: list[dict], buckler_timing: str) -> list[dict]:
                       for i in range(n)]
             for i, m in enumerate(seq):
                 delta = None
+                gap = None
                 if before[i] is not None and after[i] is not None:
                     delta = after[i] - before[i]
                     if abs(delta) > cap:
-                        delta = None
+                        gap, delta = delta, None
                 m[f"{key}_before"], m[f"{key}_after"], m[f"{key}_delta"] = before[i], after[i], delta
+                m[f"{key}_gap"] = gap
         for i, m in enumerate(seq):
             m["char_game"] = i + 1
     return matches
@@ -450,10 +453,122 @@ def _group(ms: list[dict], key: str) -> dict[str, list[dict]]:
     return groups
 
 
+# ---- coaching tips -------------------------------------------------------------------------
+
+def _signed(n: int) -> str:
+    return f"{n:+,}".replace("-", "\u2212")
+
+
+def _pct(x: float | None) -> str:
+    return f"{round(x * 100)}%" if x is not None else "?"
+
+
+def insights(out: dict, limit: int = 4) -> list[dict]:
+    """Plain-English takeaways, most useful first. Each needs a decent sample behind it."""
+    tips: list[tuple[float, dict]] = []
+
+    def add(score, tone, icon, tab, title, text):
+        tips.append((score, {"tone": tone, "icon": icon, "tab": tab, "title": title, "text": text}))
+
+    overall = out["overview"]["summary"]["win_rate"]
+    rows = [r for r in out["matchups"] if r["matches"] >= 6 and r["win_rate"] is not None]
+    if rows and overall is not None:
+        worst = min(rows, key=lambda r: (r["win_rate"], -r["matches"]))
+        if worst["win_rate"] <= overall - 0.10:
+            if worst["net_mr"]:
+                cost = f", {_signed(worst['net_mr'])} MR"
+            elif worst["net_lp"]:
+                cost = f", {_signed(worst['net_lp'])} LP"
+            else:
+                cost = ""
+            add(3 + (overall - worst["win_rate"]) * 10, "warn", "swords", "matchups",
+                f"Toughest matchup: {worst['character']}",
+                f"You're {worst['wins']}–{worst['losses']} ({_pct(worst['win_rate'])}{cost}) against "
+                f"{worst['character']}. Worth a session in training mode.")
+        best = max(rows, key=lambda r: (r["win_rate"], r["matches"]))
+        if best["win_rate"] >= overall + 0.12:
+            add(1 + (best["win_rate"] - overall) * 5, "good", "trophy", "matchups",
+                f"Best matchup: {best['character']}",
+                f"You're {best['wins']}–{best['losses']} ({_pct(best['win_rate'])}) against {best['character']}.")
+
+    tilt = out["sessions"]["tilt"]
+    if (tilt["after_2_losses"]["matches"] >= 10 and tilt["after_win"]["win_rate"] is not None
+            and tilt["after_2_losses"]["win_rate"] is not None):
+        drop = tilt["after_win"]["win_rate"] - tilt["after_2_losses"]["win_rate"]
+        if drop >= 0.08:
+            add(3 + drop * 10, "warn", "mood-sad", "sessions", "You tilt after back-to-back losses",
+                f"You win {_pct(tilt['after_win']['win_rate'])} after a win but "
+                f"{_pct(tilt['after_2_losses']['win_rate'])} after two straight losses. "
+                "A short break after two losses could save rating.")
+
+    positions = [r for r in out["sessions"]["by_position"] if r["matches"] >= 15 and r["win_rate"] is not None]
+    if len(positions) >= 2 and overall is not None:
+        late = positions[-1]
+        if late["label"] in ("11–15", "16+") and late["win_rate"] <= overall - 0.08:
+            add(2 + (overall - late["win_rate"]) * 10, "warn", "clock", "sessions", "Long sessions cost you",
+                f"From match {late['label'].split('–')[0].rstrip('+')} of a session on, you win "
+                f"{_pct(late['win_rate'])} (vs {_pct(overall)} overall). Consider shorter sessions.")
+
+    times = [r for r in out["sessions"]["by_time_of_day"] if r["matches"] >= 20 and r["win_rate"] is not None]
+    if len(times) >= 2:
+        hi = max(times, key=lambda r: r["win_rate"])
+        lo = min(times, key=lambda r: r["win_rate"])
+        if hi["win_rate"] - lo["win_rate"] >= 0.10:
+            add(1 + (hi["win_rate"] - lo["win_rate"]) * 5, "info", "sun", "sessions", "Your best time to play",
+                f"You win {_pct(hi['win_rate'])} in the {hi['label'].split(' (')[0].lower()} and "
+                f"{_pct(lo['win_rate'])} in the {lo['label'].split(' (')[0].lower()}.")
+
+    rounds = out["rounds"]
+    comeback = rounds["after_round1_loss"]
+    if comeback["matches"] >= 20 and comeback["win_rate"] is not None and comeback["win_rate"] < 0.22:
+        add(1.5 + (0.22 - comeback["win_rate"]) * 10, "info", "arrow-back-up", "rounds",
+            "Comebacks are rare",
+            f"After losing round 1 you win {_pct(comeback['win_rate'])} of matches. "
+            "Round 1 matters a lot for you; play it carefully.")
+    decider = rounds["deciding_round"]
+    if decider["matches"] >= 15 and decider["win_rate"] is not None and decider["win_rate"] < 0.42:
+        add(2 + (0.5 - decider["win_rate"]) * 10, "warn", "flag", "rounds", "Final rounds slip away",
+            f"You win {_pct(decider['win_rate'])} of matches that go to a final round.")
+
+    above = [r for r in out["opponents"]["by_division_gap"] + out["opponents"]["by_mr_gap"]
+             if "above" in r["label"] and r["matches"] >= 15 and r["win_rate"] is not None]
+    for r in above:
+        if r["win_rate"] >= 0.5:
+            add(1.5, "good", "arrow-up-right", "opponents", "You beat higher-ranked players",
+                f"You're {r['wins']}–{r['losses']} ({_pct(r['win_rate'])}) against opponents {r['label'].lower()}. "
+                "You're ready to climb.")
+            break
+
+    cur = out["overview"]["streaks"]["current"]
+    if cur["type"] == "L" and cur["length"] >= 3:
+        after = tilt["after_3_losses"]
+        extra = (f" Historically you win {_pct(after['win_rate'])} right after 3 straight losses."
+                 if after["matches"] >= 10 else "")
+        add(5, "warn", "player-pause", "sessions", f"{cur['length']} losses in a row",
+            f"You're on a {cur['length']}-match losing streak.{extra} Maybe take a breather.")
+    elif cur["type"] == "W" and cur["length"] >= 4:
+        add(2, "good", "flame", "overview", f"{cur['length']} wins in a row", "You're on a roll. Keep it going.")
+
+    tips.sort(key=lambda t: -t[0])
+    return [t for _, t in tips[:limit]]
+
+
+def recent_gaps(matches: list[dict], now: int, days: int = 14) -> dict:
+    """Rating jumps no single match explains: missed matches (or an MR season reset)."""
+    since = now - days * 86400
+    gaps = [m for m in matches if m["played_at"] >= since and (m.get("lp_gap") or m.get("mr_gap"))]
+    return {
+        "count": len(gaps),
+        "days": days,
+        "items": [{"t": m["played_at"], "character": m["my_character"],
+                   "lp": m.get("lp_gap"), "mr": m.get("mr_gap")} for m in gaps[-5:]],
+    }
+
+
 # ---- entry point ----------------------------------------------------------------------
 
 def compute(matches: list[dict], config: dict, start: int | None = None, end: int | None = None,
-            character: str | None = None, tz_offset: int = 0) -> dict:
+            character: str | None = None, tz_offset: int = 0, now: int | None = None) -> dict:
     detection = detect_timing(matches)
     timing = config.get("lp_timing", "auto")
     timing = detection["timing"] if timing not in ("pre", "post") else timing
@@ -464,7 +579,7 @@ def compute(matches: list[dict], config: dict, start: int | None = None, end: in
                 if (start is None or m["played_at"] >= start) and (end is None or m["played_at"] < end)]
     ms = [m for m in in_range if character is None or m["my_character"] == character]
 
-    return {
+    out = {
         "timing": {**detection, "used": timing, "setting": config.get("lp_timing", "auto")},
         "filters": {"start": start, "end": end, "character": character},
         "overview": {
@@ -480,4 +595,7 @@ def compute(matches: list[dict], config: dict, start: int | None = None, end: in
         "sessions": sessions_section(ms, tz_offset, gap),
         "opponents": opponents_section(ms),
         "rounds": rounds_section(ms),
+        "gaps": recent_gaps(matches, now if now is not None else int(time.time())),
     }
+    out["insights"] = insights(out)
+    return out
