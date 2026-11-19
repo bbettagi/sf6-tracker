@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SF6 Tracker</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M8 22l5-12 4 8 3-5 4 9' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/app.css">
+  <script>
+    try { const t = localStorage.getItem("sf6t-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" class="brand-bg"/><path d="M8 22l5-12 4 8 3-5 4 9" class="brand-line"/></svg>
+      <span>SF6 Tracker</span>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
+      <button role="tab" data-tab="rank">Rank</button>
+      <button role="tab" data-tab="matchups">Matchups</button>
+      <button role="tab" data-tab="sessions">Sessions</button>
+      <button role="tab" data-tab="opponents">Opponents</button>
+      <button role="tab" data-tab="rounds">Rounds</button>
+      <button role="tab" data-tab="matches">Matches</button>
+      <button role="tab" data-tab="sync">Sync</button>
+    </nav>
+    <button class="icon-btn" id="theme-toggle" title="Switch light / dark" aria-label="Switch light or dark theme">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+    </button>
+  </header>
+
+  <section class="filters" aria-label="Filters">
+    <label class="field">
+      <span>Date range</span>
+      <select id="f-range">
+        <option value="all">All time</option>
+        <option value="today">Today</option>
+        <option value="7">Last 7 days</option>
+        <option value="30">Last 30 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="custom">Custom…</option>
+      </select>
+    </label>
+    <label class="field custom-range" hidden><span>From</span><input type="date" id="f-from"></label>
+    <label class="field custom-range" hidden><span>To</span><input type="date" id="f-to"></label>
+    <label class="field">
+      <span>My character</span>
+      <select id="f-char"><option value="">All characters</option></select>
+    </label>
+    <div class="filter-note" id="filter-note"></div>
+    <button class="btn btn-primary" id="quick-sync" hidden>Sync now</button>
+  </section>
+
+  <main id="main">
+    <div id="empty" class="empty" hidden>
+      <h2>No ranked matches yet</h2>
+      <p>Pull your battle log from Buckler's Boot Camp on the <a href="#sync" data-goto="sync">Sync tab</a>, or log a match by hand on the <a href="#matches" data-goto="matches">Matches tab</a>.</p>
+    </div>
+    <section class="panel" data-panel="overview"></section>
+    <section class="panel" data-panel="rank" hidden></section>
+    <section class="panel" data-panel="matchups" hidden></section>
+    <section class="panel" data-panel="sessions" hidden></section>
+    <section class="panel" data-panel="opponents" hidden></section>
+    <section class="panel" data-panel="rounds" hidden></section>
+    <section class="panel" data-panel="matches" hidden></section>
+    <section class="panel" data-panel="sync" hidden></section>
+  </main>
+
+  <div id="tooltip-live" class="sr-only" aria-live="polite"></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="/vendor/chart.umd.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
